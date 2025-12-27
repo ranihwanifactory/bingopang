@@ -1,0 +1,5 @@
+{
+  "name": "Magic Bingo World",
+  "description": "A cute and colorful 5x5 multiplayer bingo game for kids, featuring real-time synchronization, Firebase authentication, and turn-based gameplay.",
+  "requestFramePermissions": []
+}
