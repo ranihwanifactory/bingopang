@@ -36,10 +36,16 @@ const Login: React.FC = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100">
+      {/* SEO text for search engine crawlers */}
+      <section className="sr-only">
+        <h2>어린이들을 위한 최고의 숫자 빙고 게임 서비스</h2>
+        <p>로그인하여 전 세계 친구들과 실시간으로 5x5 빙고 대결을 펼쳐보세요. 무료 회원가입 또는 구글 소셜 로그인을 지원합니다.</p>
+      </section>
+
       <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl p-8 border-4 border-pink-200">
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
-            <span className="text-6xl">✨</span>
+            <span className="text-6xl" role="img" aria-label="Magic Sparkles">✨</span>
           </div>
           <h1 className="text-4xl font-extrabold text-pink-500 mb-2">마법의 빙고나라</h1>
           <p className="text-gray-500 text-lg">친구들과 함께 즐거운 빙고 모험을 시작해요!</p>
@@ -69,6 +75,7 @@ const Login: React.FC = () => {
             onChange={(e) => setEmail(e.target.value)}
             className="w-full px-5 py-3 rounded-2xl border-2 border-pink-100 focus:border-pink-300 focus:outline-none transition-colors"
             required
+            autoComplete="email"
           />
           <input
             type="password"
@@ -77,6 +84,7 @@ const Login: React.FC = () => {
             onChange={(e) => setPassword(e.target.value)}
             className="w-full px-5 py-3 rounded-2xl border-2 border-pink-100 focus:border-pink-300 focus:outline-none transition-colors"
             required
+            autoComplete={isRegistering ? "new-password" : "current-password"}
           />
           <button
             type="submit"
