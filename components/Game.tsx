@@ -1,9 +1,9 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { ref, onValue, update, remove, get } from 'firebase/database';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { ref, onValue, update, remove, get, increment } from 'firebase/database';
 import { db } from '../firebase';
-import { UserInfo, Room, Player } from '../types';
-import { ChevronLeft, Trophy, User as UserIcon, HelpCircle, Star } from 'lucide-react';
+import { UserInfo, Room, Player, PairRecord } from '../types';
+import { ChevronLeft, Trophy, User as UserIcon, HelpCircle, Star, Sword } from 'lucide-react';
 
 interface GameProps {
   roomId: string;
@@ -15,6 +15,8 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
   const [room, setRoom] = useState<Room | null>(null);
   const [localBoard, setLocalBoard] = useState<number[][]>([]);
   const [bingoCount, setBingoCount] = useState(0);
+  const [vsRecords, setVsRecords] = useState<Record<string, PairRecord>>({});
+  const hasUpdatedStats = useRef(false);
 
   // Generate 5x5 random board (1-25)
   const generateBoard = useCallback(() => {
@@ -30,16 +32,41 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
     return board;
   }, []);
 
-  // Initialize board for current player
+  // Fetch VS records for all participants relative to the current user
+  useEffect(() => {
+    if (!room?.players) return;
+
+    const playerIds = Object.keys(room.players).filter(pid => pid !== user.uid);
+    const unsubscribes = playerIds.map(pid => {
+      // Sort UIDs to have a consistent pairing key
+      const [u1, u2] = [user.uid, pid].sort();
+      const vsRef = ref(db, `pairings/${u1}_${u2}`);
+      
+      return onValue(vsRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+          // data is { [u1]: wins, [u2]: wins, total: x }
+          const myWins = data[user.uid] || 0;
+          const total = data.total || 0;
+          setVsRecords(prev => ({
+            ...prev,
+            [pid]: { wins: myWins, total: total }
+          }));
+        }
+      });
+    });
+
+    return () => unsubscribes.forEach(unsub => unsub());
+  }, [room?.players, user.uid]);
+
+  // Initialize board and join logic
   useEffect(() => {
     const roomRef = ref(db, `rooms/${roomId}`);
     
-    // Check if player is already in room
     get(roomRef).then((snapshot) => {
       const data = snapshot.val();
       if (data) {
-        if (!data.players[user.uid]) {
-          // Join room if not already there
+        if (!data.players || !data.players[user.uid]) {
           const updates: any = {};
           updates[`players/${user.uid}`] = {
             uid: user.uid,
@@ -49,12 +76,15 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
             lines: 0,
             isReady: true,
           };
+          updates['lastActivity'] = Date.now();
           update(roomRef, updates);
         } else if (!data.players[user.uid].board || data.players[user.uid].board.length === 0) {
-          // Self-heal: If player is in room but board is missing (happens to host due to FB behavior)
           const updates: any = {};
           updates[`players/${user.uid}/board`] = generateBoard();
+          updates['lastActivity'] = Date.now();
           update(roomRef, updates);
+        } else {
+          update(roomRef, { lastActivity: Date.now() });
         }
       }
     });
@@ -63,8 +93,12 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
       const data = snapshot.val();
       if (data) {
         setRoom(data);
-        if (data.players && data.players[user.uid] && data.players[user.uid].board) {
+        if (data.players?.[user.uid]?.board) {
           setLocalBoard(data.players[user.uid].board);
+        }
+        // Reset the "updated stats" flag if a new game starts
+        if (data.status === 'playing') {
+          hasUpdatedStats.current = false;
         }
       } else {
         onLeave();
@@ -79,15 +113,16 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
     if (!localBoard || localBoard.length < 5) return 0;
     
     let count = 0;
+    const pickedSet = new Set(picked || []);
     // Rows
     for (let r = 0; r < 5; r++) {
-      if (localBoard[r] && localBoard[r].every(num => picked.includes(num))) count++;
+      if (localBoard[r] && localBoard[r].every(num => pickedSet.has(num))) count++;
     }
     // Cols
     for (let c = 0; c < 5; c++) {
       let full = true;
       for (let r = 0; r < 5; r++) {
-        if (!localBoard[r] || !picked.includes(localBoard[r][c])) {
+        if (!localBoard[r] || !pickedSet.has(localBoard[r][c])) {
           full = false;
           break;
         }
@@ -98,8 +133,8 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
     let diag1 = true;
     let diag2 = true;
     for (let i = 0; i < 5; i++) {
-      if (!localBoard[i] || !picked.includes(localBoard[i][i])) diag1 = false;
-      if (!localBoard[i] || !picked.includes(localBoard[i][4 - i])) diag2 = false;
+      if (!localBoard[i] || !pickedSet.has(localBoard[i][i])) diag1 = false;
+      if (!localBoard[i] || !pickedSet.has(localBoard[i][4 - i])) diag2 = false;
     }
     if (diag1) count++;
     if (diag2) count++;
@@ -113,21 +148,56 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
       const lines = checkBingo(room.pickedNumbers || []);
       setBingoCount(lines);
       
-      // Sync lines to database
-      if (room.players[user.uid] && room.players[user.uid].lines !== lines) {
+      if (room.players?.[user.uid] && room.players[user.uid].lines !== lines) {
         const updates: any = {};
         updates[`players/${user.uid}/lines`] = lines;
         
-        // Check for victory (5 lines)
         if (lines >= 5 && !room.winner) {
           updates['winner'] = user.uid;
           updates['status'] = 'finished';
         }
-        
+        updates['lastActivity'] = Date.now();
         update(ref(db, `rooms/${roomId}`), updates);
       }
     }
   }, [room?.pickedNumbers, room?.status, checkBingo, user.uid, roomId, localBoard]);
+
+  // Stats update logic when game finished
+  useEffect(() => {
+    if (room?.status === 'finished' && room.winner && !hasUpdatedStats.current) {
+      hasUpdatedStats.current = true;
+      // Only host or winner handles the global stat increment to prevent duplicate writes
+      if (user.uid === room.hostId) {
+        const pids = Object.keys(room.players);
+        const winnerId = room.winner;
+
+        // 1. Update individual user stats
+        pids.forEach(pid => {
+          const statsRef = ref(db, `users/${pid}`);
+          update(statsRef, {
+            totalGames: increment(1),
+            wins: pid === winnerId ? increment(1) : increment(0)
+          });
+        });
+
+        // 2. Update head-to-head records for all participant pairs
+        for (let i = 0; i < pids.length; i++) {
+          for (let j = i + 1; j < pids.length; j++) {
+            const p1 = pids[i];
+            const p2 = pids[j];
+            const [u1, u2] = [p1, p2].sort();
+            const pairRef = ref(db, `pairings/${u1}_${u2}`);
+            
+            const updates: any = { total: increment(1) };
+            if (p1 === winnerId) updates[p1] = increment(1);
+            if (p2 === winnerId) updates[p2] = increment(1);
+            
+            update(pairRef, updates);
+          }
+        }
+      }
+    }
+  }, [room?.status, room?.winner, room?.players, room?.hostId, user.uid]);
 
   const handleStartGame = async () => {
     if (!room) return;
@@ -139,9 +209,10 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
 
     await update(ref(db, `rooms/${roomId}`), {
       status: 'playing',
-      currentTurn: room.hostId, // Host always starts
+      currentTurn: room.hostId, 
       pickedNumbers: [],
-      winner: null
+      winner: null,
+      lastActivity: Date.now()
     });
   };
 
@@ -156,26 +227,12 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
 
     await update(ref(db, `rooms/${roomId}`), {
       pickedNumbers: newPicked,
-      currentTurn: nextTurn
+      currentTurn: nextTurn,
+      lastActivity: Date.now()
     });
   };
 
   const handleLeave = async () => {
-    if (room) {
-      const players = { ...(room.players || {}) };
-      delete players[user.uid];
-      
-      if (Object.keys(players).length === 0) {
-        await remove(ref(db, `rooms/${roomId}`));
-      } else {
-        const updates: any = {};
-        updates['players'] = players;
-        if (room.hostId === user.uid) {
-          updates['hostId'] = Object.keys(players)[0];
-        }
-        await update(ref(db, `rooms/${roomId}`), updates);
-      }
-    }
     onLeave();
   };
 
@@ -190,13 +247,13 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
           className="flex items-center gap-1 text-pink-500 font-bold hover:bg-white px-4 py-2 rounded-2xl transition-all"
         >
           <ChevronLeft size={24} />
-          나가기
+          돌아가기
         </button>
         <div className="flex-1 text-center">
           <h1 className="text-3xl font-extrabold text-pink-500 drop-shadow-sm">{room.name}</h1>
           <p className="text-gray-400 text-sm">참가 코드: {roomId.slice(-5)}</p>
         </div>
-        <div className="w-24"></div> {/* Spacer */}
+        <div className="w-24"></div>
       </div>
 
       <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -209,22 +266,35 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
               참가자 명단
             </h3>
             <div className="space-y-3">
-              {(Object.values(room.players || {}) as Player[]).map((p) => (
-                <div key={p.uid} className={`flex items-center justify-between p-3 rounded-2xl border-2 transition-all ${
-                  room.currentTurn === p.uid ? 'border-pink-300 bg-pink-50' : 'border-gray-50'
-                }`}>
-                  <div className="flex items-center gap-3">
-                    <img src={p.photoURL || `https://picsum.photos/100/100?seed=${p.uid}`} className="w-10 h-10 rounded-full border-2 border-white shadow-sm" alt="P" />
-                    <div>
-                      <p className="font-bold text-gray-700 text-sm">{p.name}{room.hostId === p.uid && ' 👑'}</p>
-                      <p className="text-pink-500 text-xs font-bold">{p.lines} 빙고!</p>
+              {(Object.values(room.players || {}) as Player[]).map((p) => {
+                const vs = vsRecords[p.uid];
+                return (
+                  <div key={p.uid} className={`flex flex-col p-3 rounded-2xl border-2 transition-all ${
+                    room.currentTurn === p.uid && room.status === 'playing' ? 'border-pink-300 bg-pink-50' : 'border-gray-50'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <img src={p.photoURL || `https://picsum.photos/100/100?seed=${p.uid}`} className="w-10 h-10 rounded-full border-2 border-white shadow-sm" alt="P" />
+                        <div>
+                          <p className="font-bold text-gray-700 text-sm">{p.name}{room.hostId === p.uid && ' 👑'}</p>
+                          <p className="text-pink-500 text-xs font-bold">{p.lines || 0} 빙고!</p>
+                        </div>
+                      </div>
+                      {room.currentTurn === p.uid && room.status === 'playing' && (
+                        <span className="text-xs bg-pink-500 text-white px-2 py-1 rounded-full animate-pulse font-bold">진행중</span>
+                      )}
                     </div>
+                    {p.uid !== user.uid && (
+                      <div className="mt-2 ml-13 flex items-center gap-2">
+                        <span className="bg-blue-50 text-blue-500 px-2 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1">
+                          <Sword size={10} />
+                          상대전적: {vs ? `${vs.wins}승 ${vs.total - vs.wins}패` : '첫 대결!'}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                  {room.currentTurn === p.uid && (
-                    <span className="text-xs bg-pink-500 text-white px-2 py-1 rounded-full animate-pulse font-bold">진행중</span>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -323,16 +393,18 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
               </div>
               <h2 className="text-5xl font-bold text-gray-800 mb-2">승리 축하해요!</h2>
               <p className="text-2xl text-pink-500 font-bold mb-8">
-                {room.players && room.players[room.winner!]?.name} 친구가 5줄 빙고를 먼저 완성했어요!
+                {room.players?.[room.winner!]?.name} 친구가 5줄 빙고를 먼저 완성했어요!
               </p>
               
               <div className="flex gap-4">
-                <button
-                  onClick={handleStartGame}
-                  className="bg-green-500 hover:bg-green-600 text-white font-bold px-8 py-4 rounded-3xl shadow-lg transform active:scale-95 transition-all"
-                >
-                  한 판 더 하기! 🔄
-                </button>
+                {user.uid === room.hostId && (
+                  <button
+                    onClick={handleStartGame}
+                    className="bg-green-500 hover:bg-green-600 text-white font-bold px-8 py-4 rounded-3xl shadow-lg transform active:scale-95 transition-all"
+                  >
+                    한 판 더 하기! 🔄
+                  </button>
+                )}
                 <button
                   onClick={handleLeave}
                   className="bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold px-8 py-4 rounded-3xl"

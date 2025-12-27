@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
-import { ref, onValue, push, set } from 'firebase/database';
+import { ref, onValue, push, set, remove, update } from 'firebase/database';
 import { db, auth } from '../firebase';
-import { UserInfo, Room } from '../types';
-import { PlusCircle, LogOut, Users, PlayCircle } from 'lucide-react';
+import { UserInfo, Room, UserStats } from '../types';
+import { PlusCircle, LogOut, Users, PlayCircle, Trophy, Medal, Crown } from 'lucide-react';
 
 interface LobbyProps {
   user: UserInfo;
@@ -12,8 +12,10 @@ interface LobbyProps {
 
 const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [rankings, setRankings] = useState<UserStats[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
+  const [activeTab, setActiveTab] = useState<'rooms' | 'ranking'>('rooms');
 
   // Helper function to generate 5x5 random board (1-25)
   const generateBoard = () => {
@@ -30,23 +32,61 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
   };
 
   useEffect(() => {
+    // Rooms listener
     const roomsRef = ref(db, 'rooms');
-    const unsubscribe = onValue(roomsRef, (snapshot) => {
+    const roomsUnsubscribe = onValue(roomsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
-        const roomList = Object.keys(data).map((key) => ({
-          ...data[key],
-          id: key,
-        }));
-        // Sort by newest first
+        const now = Date.now();
+        const ROOM_EXPIRY_MS = 2 * 60 * 60 * 1000;
+        const roomList: Room[] = [];
+        Object.keys(data).forEach((key) => {
+          const room = data[key];
+          const lastActive = room.lastActivity || room.createdAt;
+          if (now - lastActive > ROOM_EXPIRY_MS) {
+            remove(ref(db, `rooms/${key}`));
+          } else {
+            roomList.push({ ...room, id: key });
+          }
+        });
         setRooms(roomList.sort((a, b) => b.createdAt - a.createdAt));
       } else {
         setRooms([]);
       }
     });
 
-    return () => unsubscribe();
-  }, []);
+    // Rankings listener
+    const usersRef = ref(db, 'users');
+    const rankingsUnsubscribe = onValue(usersRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const userList: UserStats[] = Object.keys(data).map(uid => ({
+          uid,
+          ...data[uid]
+        }));
+        // Sort by wins, then win rate
+        setRankings(userList.sort((a, b) => {
+          if (b.wins !== a.wins) return b.wins - a.wins;
+          const rateA = a.totalGames > 0 ? a.wins / a.totalGames : 0;
+          const rateB = b.totalGames > 0 ? b.wins / b.totalGames : 0;
+          return rateB - rateA;
+        }).slice(0, 10)); // Top 10
+      }
+    });
+
+    // Initialize/Update current user profile in users node
+    if (user) {
+      update(ref(db, `users/${user.uid}`), {
+        name: user.displayName || '익명친구',
+        photoURL: user.photoURL || `https://picsum.photos/100/100?seed=${user.uid}`
+      });
+    }
+
+    return () => {
+      roomsUnsubscribe();
+      rankingsUnsubscribe();
+    };
+  }, [user]);
 
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,6 +97,7 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
     const roomId = newRoomRef.key;
 
     if (roomId) {
+      const now = Date.now();
       const roomData: Partial<Room> = {
         name: newRoomName,
         hostId: user.uid,
@@ -64,13 +105,14 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
         currentTurn: user.uid,
         pickedNumbers: [],
         winner: null,
-        createdAt: Date.now(),
+        createdAt: now,
+        lastActivity: now,
         players: {
           [user.uid]: {
             uid: user.uid,
             name: user.displayName || '익명친구',
             photoURL: user.photoURL,
-            board: generateBoard(), // Generate board immediately for host
+            board: generateBoard(),
             lines: 0,
             isReady: true,
           }
@@ -96,7 +138,7 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
           <img src={user.photoURL || `https://picsum.photos/100/100?seed=${user.uid}`} className="w-16 h-16 rounded-full border-4 border-white shadow-md" alt="Avatar" />
           <div>
             <h2 className="text-2xl font-bold text-gray-800">안녕, {user.displayName}! ✨</h2>
-            <p className="text-pink-400">오늘은 어떤 친구와 빙고를 할까요?</p>
+            <p className="text-pink-400">오늘은 누가 빙고왕이 될까요?</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -117,47 +159,111 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
         </div>
       </div>
 
-      {/* Room List */}
-      <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {rooms.length === 0 ? (
-          <div className="col-span-full flex flex-col items-center justify-center py-20 bg-white rounded-3xl border-4 border-dashed border-pink-100 text-gray-400">
-            <span className="text-6xl mb-4">🎈</span>
-            <p className="text-xl">참여할 수 있는 방이 없어요. 새로운 방을 만들어보세요!</p>
-          </div>
-        ) : (
-          rooms.map((room) => (
-            <div key={room.id} className="bg-white rounded-3xl p-6 shadow-xl border-2 border-pink-50 hover:border-pink-200 transition-all group">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="text-xl font-bold text-gray-800 mb-1">{room.name}</h3>
-                  <div className="flex items-center gap-2 text-sm text-gray-400">
-                    <Users size={16} />
-                    <span>참가자 {Object.keys(room.players || {}).length}명</span>
+      {/* Tabs */}
+      <div className="max-w-6xl mx-auto flex gap-4 mb-8">
+        <button
+          onClick={() => setActiveTab('rooms')}
+          className={`px-8 py-3 rounded-2xl font-bold transition-all ${
+            activeTab === 'rooms' ? 'bg-pink-500 text-white shadow-lg' : 'bg-white text-gray-500 hover:bg-pink-100'
+          }`}
+        >
+          게임 목록
+        </button>
+        <button
+          onClick={() => setActiveTab('ranking')}
+          className={`px-8 py-3 rounded-2xl font-bold transition-all flex items-center gap-2 ${
+            activeTab === 'ranking' ? 'bg-yellow-400 text-white shadow-lg' : 'bg-white text-gray-500 hover:bg-yellow-100'
+          }`}
+        >
+          <Trophy size={20} />
+          빙고 랭킹
+        </button>
+      </div>
+
+      {activeTab === 'rooms' ? (
+        <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {rooms.length === 0 ? (
+            <div className="col-span-full flex flex-col items-center justify-center py-20 bg-white rounded-3xl border-4 border-dashed border-pink-100 text-gray-400">
+              <span className="text-6xl mb-4">🎈</span>
+              <p className="text-xl">참여할 수 있는 방이 없어요. 새로운 방을 만들어보세요!</p>
+            </div>
+          ) : (
+            rooms.map((room) => (
+              <div key={room.id} className="bg-white rounded-3xl p-6 shadow-xl border-2 border-pink-50 hover:border-pink-200 transition-all group">
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-800 mb-1">{room.name}</h3>
+                    <div className="flex items-center gap-2 text-sm text-gray-400">
+                      <Users size={16} />
+                      <span>참가자 {Object.keys(room.players || {}).length}명</span>
+                    </div>
+                  </div>
+                  <div className={`px-3 py-1 rounded-full text-xs font-bold ${
+                    room.status === 'waiting' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
+                  }`}>
+                    {room.status === 'waiting' ? '대기 중' : '진행 중'}
                   </div>
                 </div>
-                <div className={`px-3 py-1 rounded-full text-xs font-bold ${
-                  room.status === 'waiting' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
-                }`}>
-                  {room.status === 'waiting' ? '대기 중' : '진행 중'}
-                </div>
+                
+                <button
+                  disabled={room.status !== 'waiting' && !room.players?.[user.uid]}
+                  onClick={() => onJoinRoom(room.id)}
+                  className={`w-full font-bold py-3 rounded-2xl flex items-center justify-center gap-2 transform active:scale-95 transition-all ${
+                    (room.status === 'waiting' || !!room.players?.[user.uid])
+                      ? 'bg-blue-400 hover:bg-blue-500 text-white shadow-md' 
+                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  <PlayCircle size={20} />
+                  {!!room.players?.[user.uid] ? '재접속하기' : '입장하기'}
+                </button>
               </div>
-              
-              <button
-                disabled={room.status !== 'waiting'}
-                onClick={() => onJoinRoom(room.id)}
-                className={`w-full font-bold py-3 rounded-2xl flex items-center justify-center gap-2 transform active:scale-95 transition-all ${
-                  room.status === 'waiting' 
-                    ? 'bg-blue-400 hover:bg-blue-500 text-white shadow-md' 
-                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                }`}
-              >
-                <PlayCircle size={20} />
-                입장하기
-              </button>
-            </div>
-          ))
-        )}
-      </div>
+            ))
+          )}
+        </div>
+      ) : (
+        <div className="max-w-4xl mx-auto bg-white rounded-[40px] p-8 shadow-2xl border-4 border-yellow-100">
+          <div className="text-center mb-8">
+            <h2 className="text-3xl font-extrabold text-yellow-500 flex items-center justify-center gap-2">
+              <Crown className="text-yellow-400" />
+              마법의 빙고나라 명예의 전당
+            </h2>
+            <p className="text-gray-400">최고의 빙고 실력자들을 확인해보세요!</p>
+          </div>
+          
+          <div className="space-y-4">
+            {rankings.length === 0 ? (
+              <p className="text-center text-gray-400 py-10">아직 등록된 랭커가 없어요.</p>
+            ) : (
+              rankings.map((rk, index) => (
+                <div key={rk.uid} className={`flex items-center justify-between p-4 rounded-3xl border-2 transition-all ${
+                  index === 0 ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50 border-gray-100'
+                }`}>
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 text-center font-bold text-xl">
+                      {index === 0 ? <Medal className="text-yellow-500 mx-auto" /> : 
+                       index === 1 ? <Medal className="text-gray-400 mx-auto" /> :
+                       index === 2 ? <Medal className="text-amber-600 mx-auto" /> : 
+                       (index + 1)}
+                    </div>
+                    <img src={rk.photoURL || `https://picsum.photos/100/100?seed=${rk.uid}`} className="w-12 h-12 rounded-full border-2 border-white shadow-sm" alt="P" />
+                    <div>
+                      <p className="font-bold text-gray-800">{rk.name} {rk.uid === user.uid && <span className="text-xs text-pink-400 ml-1">(나)</span>}</p>
+                      <p className="text-xs text-gray-400">{rk.totalGames || 0}전 {rk.wins || 0}승</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-black text-yellow-600">{rk.wins || 0}승</p>
+                    <p className="text-xs font-bold text-yellow-400">
+                      승률: {rk.totalGames > 0 ? Math.round((rk.wins / rk.totalGames) * 100) : 0}%
+                    </p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Create Room Modal */}
       {isCreating && (

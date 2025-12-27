@@ -10,6 +10,19 @@ export interface Player {
   isReady: boolean;
 }
 
+export interface UserStats {
+  uid: string;
+  name: string;
+  photoURL: string | null;
+  wins: number;
+  totalGames: number;
+}
+
+export interface PairRecord {
+  wins: number;
+  total: number;
+}
+
 export interface Room {
   id: string;
   name: string;
@@ -20,6 +33,7 @@ export interface Room {
   pickedNumbers: number[];
   winner: string | null;
   createdAt: number;
+  lastActivity: number;
 }
 
 export interface UserInfo {
