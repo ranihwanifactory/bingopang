@@ -4,6 +4,7 @@ import { ref, onValue, update, remove, get, increment, onDisconnect } from 'fire
 import { db } from '../firebase';
 import { UserInfo, Room, Player, PairRecord } from '../types';
 import { ChevronLeft, Trophy, User as UserIcon, Star, Sword, Share2, Check, Trash2 } from 'lucide-react';
+import KakaoAd from './KakaoAd';
 
 interface GameProps {
   roomId: string;
@@ -326,6 +327,9 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
           )}
         </section>
       </main>
+      
+      {/* Bottom Ad Area */}
+      <KakaoAd />
     </div>
   );
 };

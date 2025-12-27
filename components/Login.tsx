@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { auth, googleProvider } from '../firebase';
 import { LogIn, UserPlus, Globe } from 'lucide-react';
+import KakaoAd from './KakaoAd';
 
 const Login: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -35,14 +36,14 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100">
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100 overflow-y-auto">
       {/* SEO text for search engine crawlers */}
       <section className="sr-only">
         <h2>어린이들을 위한 최고의 숫자 빙고 게임 서비스</h2>
         <p>로그인하여 전 세계 친구들과 실시간으로 5x5 빙고 대결을 펼쳐보세요. 무료 회원가입 또는 구글 소셜 로그인을 지원합니다.</p>
       </section>
 
-      <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl p-8 border-4 border-pink-200">
+      <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl p-8 border-4 border-pink-200 my-auto">
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
             <span className="text-6xl" role="img" aria-label="Magic Sparkles">✨</span>
@@ -112,6 +113,9 @@ const Login: React.FC = () => {
           </button>
         </div>
       </div>
+      
+      {/* Bottom Ad Area */}
+      <KakaoAd />
     </div>
   );
 };

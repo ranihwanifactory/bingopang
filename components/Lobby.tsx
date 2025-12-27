@@ -4,6 +4,7 @@ import { ref, onValue, push, set, remove, update } from 'firebase/database';
 import { db, auth } from '../firebase';
 import { UserInfo, Room, UserStats } from '../types';
 import { PlusCircle, LogOut, Users, PlayCircle, Trophy, Medal, Crown, Trash2 } from 'lucide-react';
+import KakaoAd from './KakaoAd';
 
 interface LobbyProps {
   user: UserInfo;
@@ -136,8 +137,8 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
   };
 
   return (
-    <div className="min-h-screen bg-pink-50 p-4 md:p-8">
-      <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4 mb-8">
+    <div className="min-h-screen bg-pink-50 p-4 md:p-8 flex flex-col">
+      <div className="max-w-6xl mx-auto w-full flex flex-col md:flex-row justify-between items-center gap-4 mb-8 shrink-0">
         <div className="flex items-center gap-4">
           <img src={user.photoURL || `https://picsum.photos/100/100?seed=${user.uid}`} className="w-16 h-16 rounded-full border-4 border-white shadow-md" alt="Avatar" />
           <div>
@@ -163,7 +164,7 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto flex gap-4 mb-8">
+      <div className="max-w-6xl mx-auto w-full flex gap-4 mb-8 shrink-0">
         <button
           onClick={() => setActiveTab('rooms')}
           className={`px-8 py-3 rounded-2xl font-bold transition-all ${
@@ -183,101 +184,106 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
         </button>
       </div>
 
-      {activeTab === 'rooms' ? (
-        <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {rooms.length === 0 ? (
-            <div className="col-span-full flex flex-col items-center justify-center py-20 bg-white rounded-3xl border-4 border-dashed border-pink-100 text-gray-400">
-              <span className="text-6xl mb-4">🎈</span>
-              <p className="text-xl">참여할 수 있는 방이 없어요. 새로운 방을 만들어보세요!</p>
-            </div>
-          ) : (
-            rooms.map((room) => (
-              <div key={room.id} className="bg-white rounded-3xl p-6 shadow-xl border-2 border-pink-50 hover:border-pink-200 transition-all group relative">
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <h3 className="text-xl font-bold text-gray-800 mb-1">{room.name}</h3>
-                    <div className="flex items-center gap-2 text-sm text-gray-400">
-                      <Users size={16} />
-                      <span>참가자 {Object.keys(room.players || {}).length}명</span>
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-2">
-                    <div className={`px-3 py-1 rounded-full text-xs font-bold ${
-                      room.status === 'waiting' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
-                    }`}>
-                      {room.status === 'waiting' ? '대기 중' : '진행 중'}
-                    </div>
-                    {room.hostId === user.uid && (
-                      <button 
-                        onClick={(e) => handleDeleteRoom(e, room.id)}
-                        className="text-red-400 hover:text-red-600 p-1 rounded-lg hover:bg-red-50 transition-colors"
-                        title="방 삭제"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                
-                <button
-                  disabled={room.status !== 'waiting' && !room.players?.[user.uid]}
-                  onClick={() => onJoinRoom(room.id)}
-                  className={`w-full font-bold py-3 rounded-2xl flex items-center justify-center gap-2 transform active:scale-95 transition-all ${
-                    (room.status === 'waiting' || !!room.players?.[user.uid])
-                      ? 'bg-blue-400 hover:bg-blue-500 text-white shadow-md' 
-                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                  }`}
-                >
-                  <PlayCircle size={20} />
-                  {!!room.players?.[user.uid] ? '재접속하기' : '입장하기'}
-                </button>
+      <div className="flex-1 overflow-y-auto mb-4">
+        {activeTab === 'rooms' ? (
+          <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {rooms.length === 0 ? (
+              <div className="col-span-full flex flex-col items-center justify-center py-20 bg-white rounded-3xl border-4 border-dashed border-pink-100 text-gray-400">
+                <span className="text-6xl mb-4">🎈</span>
+                <p className="text-xl">참여할 수 있는 방이 없어요. 새로운 방을 만들어보세요!</p>
               </div>
-            ))
-          )}
-        </div>
-      ) : (
-        <div className="max-w-4xl mx-auto bg-white rounded-[40px] p-8 shadow-2xl border-4 border-yellow-100">
-          <div className="text-center mb-8">
-            <h2 className="text-3xl font-extrabold text-yellow-500 flex items-center justify-center gap-2">
-              <Crown className="text-yellow-400" />
-              마법의 빙고나라 명예의 전당
-            </h2>
-            <p className="text-gray-400">최고의 빙고 실력자들을 확인해보세요!</p>
-          </div>
-          
-          <div className="space-y-4">
-            {rankings.length === 0 ? (
-              <p className="text-center text-gray-400 py-10">아직 등록된 랭커가 없어요.</p>
             ) : (
-              rankings.map((rk, index) => (
-                <div key={rk.uid} className={`flex items-center justify-between p-4 rounded-3xl border-2 transition-all ${
-                  index === 0 ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50 border-gray-100'
-                }`}>
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 text-center font-bold text-xl">
-                      {index === 0 ? <Medal className="text-yellow-500 mx-auto" /> : 
-                       index === 1 ? <Medal className="text-gray-400 mx-auto" /> :
-                       index === 2 ? <Medal className="text-amber-600 mx-auto" /> : 
-                       (index + 1)}
-                    </div>
-                    <img src={rk.photoURL || `https://picsum.photos/100/100?seed=${rk.uid}`} className="w-12 h-12 rounded-full border-2 border-white shadow-sm" alt="P" />
+              rooms.map((room) => (
+                <div key={room.id} className="bg-white rounded-3xl p-6 shadow-xl border-2 border-pink-50 hover:border-pink-200 transition-all group relative">
+                  <div className="flex justify-between items-start mb-4">
                     <div>
-                      <p className="font-bold text-gray-800">{rk.name} {rk.uid === user.uid && <span className="text-xs text-pink-400 ml-1">(나)</span>}</p>
-                      <p className="text-xs text-gray-400">{rk.totalGames || 0}전 {rk.wins || 0}승</p>
+                      <h3 className="text-xl font-bold text-gray-800 mb-1">{room.name}</h3>
+                      <div className="flex items-center gap-2 text-sm text-gray-400">
+                        <Users size={16} />
+                        <span>참가자 {Object.keys(room.players || {}).length}명</span>
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <div className={`px-3 py-1 rounded-full text-xs font-bold ${
+                        room.status === 'waiting' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
+                      }`}>
+                        {room.status === 'waiting' ? '대기 중' : '진행 중'}
+                      </div>
+                      {room.hostId === user.uid && (
+                        <button 
+                          onClick={(e) => handleDeleteRoom(e, room.id)}
+                          className="text-red-400 hover:text-red-600 p-1 rounded-lg hover:bg-red-50 transition-colors"
+                          title="방 삭제"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      )}
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-2xl font-black text-yellow-600">{rk.wins || 0}승</p>
-                    <p className="text-xs font-bold text-yellow-400">
-                      승률: {rk.totalGames > 0 ? Math.round((rk.wins / rk.totalGames) * 100) : 0}%
-                    </p>
-                  </div>
+                  
+                  <button
+                    disabled={room.status !== 'waiting' && !room.players?.[user.uid]}
+                    onClick={() => onJoinRoom(room.id)}
+                    className={`w-full font-bold py-3 rounded-2xl flex items-center justify-center gap-2 transform active:scale-95 transition-all ${
+                      (room.status === 'waiting' || !!room.players?.[user.uid])
+                        ? 'bg-blue-400 hover:bg-blue-500 text-white shadow-md' 
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    <PlayCircle size={20} />
+                    {!!room.players?.[user.uid] ? '재접속하기' : '입장하기'}
+                  </button>
                 </div>
               ))
             )}
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="max-w-4xl mx-auto bg-white rounded-[40px] p-8 shadow-2xl border-4 border-yellow-100">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-extrabold text-yellow-500 flex items-center justify-center gap-2">
+                <Crown className="text-yellow-400" />
+                마법의 빙고나라 명예의 전당
+              </h2>
+              <p className="text-gray-400">최고의 빙고 실력자들을 확인해보세요!</p>
+            </div>
+            
+            <div className="space-y-4">
+              {rankings.length === 0 ? (
+                <p className="text-center text-gray-400 py-10">아직 등록된 랭커가 없어요.</p>
+              ) : (
+                rankings.map((rk, index) => (
+                  <div key={rk.uid} className={`flex items-center justify-between p-4 rounded-3xl border-2 transition-all ${
+                    index === 0 ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50 border-gray-100'
+                  }`}>
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 text-center font-bold text-xl">
+                        {index === 0 ? <Medal className="text-yellow-500 mx-auto" /> : 
+                         index === 1 ? <Medal className="text-gray-400 mx-auto" /> :
+                         index === 2 ? <Medal className="text-amber-600 mx-auto" /> : 
+                         (index + 1)}
+                      </div>
+                      <img src={rk.photoURL || `https://picsum.photos/100/100?seed=${rk.uid}`} className="w-12 h-12 rounded-full border-2 border-white shadow-sm" alt="P" />
+                      <div>
+                        <p className="font-bold text-gray-800">{rk.name} {rk.uid === user.uid && <span className="text-xs text-pink-400 ml-1">(나)</span>}</p>
+                        <p className="text-xs text-gray-400">{rk.totalGames || 0}전 {rk.wins || 0}승</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-2xl font-black text-yellow-600">{rk.wins || 0}승</p>
+                      <p className="text-xs font-bold text-yellow-400">
+                        승률: {rk.totalGames > 0 ? Math.round((rk.wins / rk.totalGames) * 100) : 0}%
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Bottom Ad Area */}
+      <KakaoAd />
 
       {isCreating && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
