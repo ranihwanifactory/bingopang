@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ref, onValue, update, remove, get, increment } from 'firebase/database';
 import { db } from '../firebase';
 import { UserInfo, Room, Player, PairRecord } from '../types';
-import { ChevronLeft, Trophy, User as UserIcon, HelpCircle, Star, Sword, Share2, Check } from 'lucide-react';
+import { ChevronLeft, Trophy, User as UserIcon, HelpCircle, Star, Sword, Share2, Check, Trash2 } from 'lucide-react';
 
 interface GameProps {
   roomId: string;
@@ -90,6 +90,7 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
           hasUpdatedStats.current = false;
         }
       } else {
+        // If the room data is null, it means the room was deleted
         onLeave();
       }
     });
@@ -180,11 +181,17 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
     }
   };
 
+  const handleDeleteRoom = async () => {
+    if (window.confirm('정말로 이 방을 삭제할까요? 모든 진행 데이터가 사라져요! 😢')) {
+      await remove(ref(db, `rooms/${roomId}`));
+      onLeave();
+    }
+  };
+
   if (!room) return null;
 
   return (
     <div className="min-h-screen bg-pink-50 flex flex-col items-center p-4">
-      {/* Toast Notification */}
       {showShareToast && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-blue-500 text-white px-6 py-3 rounded-full shadow-2xl z-50 flex items-center gap-2 animate-bounce">
           <Check size={20} />
@@ -200,9 +207,16 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
           <h1 className="text-3xl font-extrabold text-pink-500 drop-shadow-sm">{room.name}</h1>
           <p className="text-gray-400 text-sm">참가 코드: {roomId.slice(-5)}</p>
         </div>
-        <button onClick={handleShareLink} className="bg-white p-3 rounded-2xl text-blue-400 hover:bg-blue-50 shadow-sm border border-blue-50">
-          <Share2 size={24} />
-        </button>
+        <div className="flex gap-2">
+          <button onClick={handleShareLink} className="bg-white p-3 rounded-2xl text-blue-400 hover:bg-blue-50 shadow-sm border border-blue-50 transition-colors">
+            <Share2 size={24} />
+          </button>
+          {user.uid === room.hostId && (
+            <button onClick={handleDeleteRoom} className="bg-white p-3 rounded-2xl text-red-400 hover:bg-red-50 shadow-sm border border-red-50 transition-colors">
+              <Trash2 size={24} />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-3 gap-8">

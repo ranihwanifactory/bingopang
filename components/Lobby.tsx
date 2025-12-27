@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { ref, onValue, push, set, remove, update } from 'firebase/database';
 import { db, auth } from '../firebase';
 import { UserInfo, Room, UserStats } from '../types';
-import { PlusCircle, LogOut, Users, PlayCircle, Trophy, Medal, Crown } from 'lucide-react';
+import { PlusCircle, LogOut, Users, PlayCircle, Trophy, Medal, Crown, Trash2 } from 'lucide-react';
 
 interface LobbyProps {
   user: UserInfo;
@@ -38,7 +38,6 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
       const data = snapshot.val();
       if (data) {
         const now = Date.now();
-        // Updated to 24 hours as per request
         const ROOM_EXPIRY_MS = 24 * 60 * 60 * 1000; 
         const roomList: Room[] = [];
         Object.keys(data).forEach((key) => {
@@ -65,17 +64,15 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
           uid,
           ...data[uid]
         }));
-        // Sort by wins, then win rate
         setRankings(userList.sort((a, b) => {
           if (b.wins !== a.wins) return b.wins - a.wins;
           const rateA = a.totalGames > 0 ? a.wins / a.totalGames : 0;
           const rateB = b.totalGames > 0 ? b.wins / b.totalGames : 0;
           return rateB - rateA;
-        }).slice(0, 10)); // Top 10
+        }).slice(0, 10));
       }
     });
 
-    // Initialize/Update current user profile in users node
     if (user) {
       update(ref(db, `users/${user.uid}`), {
         name: user.displayName || '익명친구',
@@ -127,13 +124,19 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
     }
   };
 
+  const handleDeleteRoom = async (e: React.MouseEvent, roomId: string) => {
+    e.stopPropagation();
+    if (window.confirm('정말로 이 방을 삭제할까요? 모든 진행 데이터가 사라져요! 😢')) {
+      await remove(ref(db, `rooms/${roomId}`));
+    }
+  };
+
   const handleLogout = () => {
     auth.signOut();
   };
 
   return (
     <div className="min-h-screen bg-pink-50 p-4 md:p-8">
-      {/* Header */}
       <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4 mb-8">
         <div className="flex items-center gap-4">
           <img src={user.photoURL || `https://picsum.photos/100/100?seed=${user.uid}`} className="w-16 h-16 rounded-full border-4 border-white shadow-md" alt="Avatar" />
@@ -160,7 +163,6 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="max-w-6xl mx-auto flex gap-4 mb-8">
         <button
           onClick={() => setActiveTab('rooms')}
@@ -190,7 +192,7 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
             </div>
           ) : (
             rooms.map((room) => (
-              <div key={room.id} className="bg-white rounded-3xl p-6 shadow-xl border-2 border-pink-50 hover:border-pink-200 transition-all group">
+              <div key={room.id} className="bg-white rounded-3xl p-6 shadow-xl border-2 border-pink-50 hover:border-pink-200 transition-all group relative">
                 <div className="flex justify-between items-start mb-4">
                   <div>
                     <h3 className="text-xl font-bold text-gray-800 mb-1">{room.name}</h3>
@@ -199,10 +201,21 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
                       <span>참가자 {Object.keys(room.players || {}).length}명</span>
                     </div>
                   </div>
-                  <div className={`px-3 py-1 rounded-full text-xs font-bold ${
-                    room.status === 'waiting' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
-                  }`}>
-                    {room.status === 'waiting' ? '대기 중' : '진행 중'}
+                  <div className="flex flex-col items-end gap-2">
+                    <div className={`px-3 py-1 rounded-full text-xs font-bold ${
+                      room.status === 'waiting' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
+                    }`}>
+                      {room.status === 'waiting' ? '대기 중' : '진행 중'}
+                    </div>
+                    {room.hostId === user.uid && (
+                      <button 
+                        onClick={(e) => handleDeleteRoom(e, room.id)}
+                        className="text-red-400 hover:text-red-600 p-1 rounded-lg hover:bg-red-50 transition-colors"
+                        title="방 삭제"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    )}
                   </div>
                 </div>
                 
@@ -266,7 +279,6 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
         </div>
       )}
 
-      {/* Create Room Modal */}
       {isCreating && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl p-8 w-full max-w-sm border-4 border-pink-200 shadow-2xl">
