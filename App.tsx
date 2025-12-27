@@ -5,6 +5,7 @@ import { auth } from './firebase';
 import Login from './components/Login';
 import Lobby from './components/Lobby';
 import Game from './components/Game';
+import BrowserGuide from './components/BrowserGuide';
 import { UserInfo } from './types';
 
 const App: React.FC = () => {
@@ -63,15 +64,18 @@ const App: React.FC = () => {
     );
   }
 
-  if (!user) {
-    return <Login />;
-  }
-
-  if (currentRoomId) {
-    return <Game roomId={currentRoomId} user={user} onLeave={handleLeaveRoom} />;
-  }
-
-  return <Lobby user={user} onJoinRoom={handleJoinRoom} />;
+  return (
+    <>
+      <BrowserGuide />
+      {!user ? (
+        <Login />
+      ) : currentRoomId ? (
+        <Game roomId={currentRoomId} user={user} onLeave={handleLeaveRoom} />
+      ) : (
+        <Lobby user={user} onJoinRoom={handleJoinRoom} />
+      )}
+    </>
+  );
 };
 
 export default App;
