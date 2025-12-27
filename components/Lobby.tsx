@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { ref, onValue, push, set, serverTimestamp } from 'firebase/database';
+import { ref, onValue, push, set } from 'firebase/database';
 import { db, auth } from '../firebase';
 import { UserInfo, Room } from '../types';
 import { PlusCircle, LogOut, Users, PlayCircle } from 'lucide-react';
@@ -14,6 +14,20 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
+
+  // Helper function to generate 5x5 random board (1-25)
+  const generateBoard = () => {
+    const nums = Array.from({ length: 25 }, (_, i) => i + 1);
+    for (let i = nums.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [nums[i], nums[j]] = [nums[j], nums[i]];
+    }
+    const board: number[][] = [];
+    for (let i = 0; i < 5; i++) {
+      board.push(nums.slice(i * 5, i * 5 + 5));
+    }
+    return board;
+  };
 
   useEffect(() => {
     const roomsRef = ref(db, 'rooms');
@@ -56,7 +70,7 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
             uid: user.uid,
             name: user.displayName || '익명친구',
             photoURL: user.photoURL,
-            board: [],
+            board: generateBoard(), // Generate board immediately for host
             lines: 0,
             isReady: true,
           }

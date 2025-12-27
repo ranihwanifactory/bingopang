@@ -16,45 +16,8 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
   const [localBoard, setLocalBoard] = useState<number[][]>([]);
   const [bingoCount, setBingoCount] = useState(0);
 
-  // Initialize board for current player
-  useEffect(() => {
-    const roomRef = ref(db, `rooms/${roomId}`);
-    
-    // Check if player is already in room
-    get(roomRef).then((snapshot) => {
-      const data = snapshot.val();
-      if (data && !data.players[user.uid]) {
-        // Join room if not already there
-        const updates: any = {};
-        updates[`players/${user.uid}`] = {
-          uid: user.uid,
-          name: user.displayName || '익명친구',
-          photoURL: user.photoURL,
-          board: generateBoard(),
-          lines: 0,
-          isReady: true,
-        };
-        update(roomRef, updates);
-      }
-    });
-
-    const unsubscribe = onValue(roomRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        setRoom(data);
-        if (data.players[user.uid]) {
-          setLocalBoard(data.players[user.uid].board);
-        }
-      } else {
-        onLeave();
-      }
-    });
-
-    return () => unsubscribe();
-  }, [roomId, user.uid, onLeave]);
-
   // Generate 5x5 random board (1-25)
-  const generateBoard = () => {
+  const generateBoard = useCallback(() => {
     const nums = Array.from({ length: 25 }, (_, i) => i + 1);
     for (let i = nums.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -65,22 +28,66 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
       board.push(nums.slice(i * 5, i * 5 + 5));
     }
     return board;
-  };
+  }, []);
+
+  // Initialize board for current player
+  useEffect(() => {
+    const roomRef = ref(db, `rooms/${roomId}`);
+    
+    // Check if player is already in room
+    get(roomRef).then((snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        if (!data.players[user.uid]) {
+          // Join room if not already there
+          const updates: any = {};
+          updates[`players/${user.uid}`] = {
+            uid: user.uid,
+            name: user.displayName || '익명친구',
+            photoURL: user.photoURL,
+            board: generateBoard(),
+            lines: 0,
+            isReady: true,
+          };
+          update(roomRef, updates);
+        } else if (!data.players[user.uid].board || data.players[user.uid].board.length === 0) {
+          // Self-heal: If player is in room but board is missing (happens to host due to FB behavior)
+          const updates: any = {};
+          updates[`players/${user.uid}/board`] = generateBoard();
+          update(roomRef, updates);
+        }
+      }
+    });
+
+    const unsubscribe = onValue(roomRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        setRoom(data);
+        if (data.players && data.players[user.uid] && data.players[user.uid].board) {
+          setLocalBoard(data.players[user.uid].board);
+        }
+      } else {
+        onLeave();
+      }
+    });
+
+    return () => unsubscribe();
+  }, [roomId, user.uid, onLeave, generateBoard]);
 
   // Bingo check logic
   const checkBingo = useCallback((picked: number[]) => {
-    if (localBoard.length === 0) return 0;
+    if (!localBoard || localBoard.length < 5) return 0;
     
     let count = 0;
     // Rows
     for (let r = 0; r < 5; r++) {
-      if (localBoard[r].every(num => picked.includes(num))) count++;
+      if (localBoard[r] && localBoard[r].every(num => picked.includes(num))) count++;
     }
     // Cols
     for (let c = 0; c < 5; c++) {
       let full = true;
       for (let r = 0; r < 5; r++) {
-        if (!picked.includes(localBoard[r][c])) {
+        if (!localBoard[r] || !picked.includes(localBoard[r][c])) {
           full = false;
           break;
         }
@@ -91,8 +98,8 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
     let diag1 = true;
     let diag2 = true;
     for (let i = 0; i < 5; i++) {
-      if (!picked.includes(localBoard[i][i])) diag1 = false;
-      if (!picked.includes(localBoard[i][4 - i])) diag2 = false;
+      if (!localBoard[i] || !picked.includes(localBoard[i][i])) diag1 = false;
+      if (!localBoard[i] || !picked.includes(localBoard[i][4 - i])) diag2 = false;
     }
     if (diag1) count++;
     if (diag2) count++;
@@ -102,7 +109,7 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
 
   // Update bingo lines whenever picked numbers change
   useEffect(() => {
-    if (room && room.status === 'playing') {
+    if (room && room.status === 'playing' && localBoard.length > 0) {
       const lines = checkBingo(room.pickedNumbers || []);
       setBingoCount(lines);
       
@@ -120,11 +127,11 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
         update(ref(db, `rooms/${roomId}`), updates);
       }
     }
-  }, [room?.pickedNumbers, room?.status, checkBingo, user.uid, roomId]);
+  }, [room?.pickedNumbers, room?.status, checkBingo, user.uid, roomId, localBoard]);
 
   const handleStartGame = async () => {
     if (!room) return;
-    const playerIds = Object.keys(room.players);
+    const playerIds = Object.keys(room.players || {});
     if (playerIds.length < 2) {
       alert('최소 2명의 플레이어가 필요해요!');
       return;
@@ -143,7 +150,7 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
     if (room.pickedNumbers?.includes(num)) return;
 
     const newPicked = [...(room.pickedNumbers || []), num];
-    const playerIds = Object.keys(room.players);
+    const playerIds = Object.keys(room.players || {});
     const currentIndex = playerIds.indexOf(user.uid);
     const nextTurn = playerIds[(currentIndex + 1) % playerIds.length];
 
@@ -155,7 +162,7 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
 
   const handleLeave = async () => {
     if (room) {
-      const players = { ...room.players };
+      const players = { ...(room.players || {}) };
       delete players[user.uid];
       
       if (Object.keys(players).length === 0) {
@@ -202,8 +209,7 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
               참가자 명단
             </h3>
             <div className="space-y-3">
-              {/* Added explicit cast to Player[] for room.players values to fix 'unknown' type errors */}
-              {(Object.values(room.players) as Player[]).map((p) => (
+              {(Object.values(room.players || {}) as Player[]).map((p) => (
                 <div key={p.uid} className={`flex items-center justify-between p-3 rounded-2xl border-2 transition-all ${
                   room.currentTurn === p.uid ? 'border-pink-300 bg-pink-50' : 'border-gray-50'
                 }`}>
@@ -276,30 +282,36 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
               </div>
 
               <div className="grid grid-cols-5 gap-3">
-                {localBoard.map((row, rIdx) => 
-                  row.map((num, cIdx) => {
-                    const isPicked = room.pickedNumbers?.includes(num);
-                    return (
-                      <button
-                        key={`${rIdx}-${cIdx}`}
-                        disabled={room.currentTurn !== user.uid || isPicked}
-                        onClick={() => handlePickNumber(num)}
-                        className={`
-                          aspect-square rounded-2xl md:rounded-3xl flex items-center justify-center text-xl md:text-3xl font-extrabold shadow-sm
-                          bingo-cell-anim relative overflow-hidden
-                          ${isPicked 
-                            ? 'bg-pink-400 text-white shadow-inner scale-95 opacity-90' 
-                            : room.currentTurn === user.uid 
-                              ? 'bg-white border-4 border-blue-100 text-gray-700 hover:border-blue-300 hover:bg-blue-50' 
-                              : 'bg-gray-50 border-4 border-gray-100 text-gray-300'
-                          }
-                        `}
-                      >
-                        {num}
-                        {isPicked && <span className="absolute top-1 right-2 text-xs md:text-sm">⭐</span>}
-                      </button>
-                    );
-                  })
+                {localBoard && localBoard.length > 0 ? (
+                  localBoard.map((row, rIdx) => 
+                    row.map((num, cIdx) => {
+                      const isPicked = room.pickedNumbers?.includes(num);
+                      return (
+                        <button
+                          key={`${rIdx}-${cIdx}`}
+                          disabled={room.currentTurn !== user.uid || isPicked}
+                          onClick={() => handlePickNumber(num)}
+                          className={`
+                            aspect-square rounded-2xl md:rounded-3xl flex items-center justify-center text-xl md:text-3xl font-extrabold shadow-sm
+                            bingo-cell-anim relative overflow-hidden
+                            ${isPicked 
+                              ? 'bg-pink-400 text-white shadow-inner scale-95 opacity-90' 
+                              : room.currentTurn === user.uid 
+                                ? 'bg-white border-4 border-blue-100 text-gray-700 hover:border-blue-300 hover:bg-blue-50' 
+                                : 'bg-gray-50 border-4 border-gray-100 text-gray-300'
+                            }
+                          `}
+                        >
+                          {num}
+                          {isPicked && <span className="absolute top-1 right-2 text-xs md:text-sm">⭐</span>}
+                        </button>
+                      );
+                    })
+                  )
+                ) : (
+                  <div className="col-span-5 flex justify-center py-20">
+                    <p className="text-gray-400">보드를 불러오는 중...</p>
+                  </div>
                 )}
               </div>
             </div>
@@ -311,7 +323,7 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
               </div>
               <h2 className="text-5xl font-bold text-gray-800 mb-2">승리 축하해요!</h2>
               <p className="text-2xl text-pink-500 font-bold mb-8">
-                {room.players[room.winner!]?.name} 친구가 5줄 빙고를 먼저 완성했어요!
+                {room.players && room.players[room.winner!]?.name} 친구가 5줄 빙고를 먼저 완성했어요!
               </p>
               
               <div className="flex gap-4">
