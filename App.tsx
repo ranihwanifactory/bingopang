@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { onAuthStateChanged, User } from 'firebase/auth';
+import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from './firebase';
 import Login from './components/Login';
 import Lobby from './components/Lobby';
@@ -13,6 +13,13 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Check for room ID in URL on load
+    const params = new URLSearchParams(window.location.search);
+    const roomIdParam = params.get('room');
+    if (roomIdParam) {
+      setCurrentRoomId(roomIdParam);
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         setUser({
@@ -30,12 +37,27 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
+  const handleJoinRoom = (roomId: string) => {
+    setCurrentRoomId(roomId);
+    // Sync URL with room state
+    const url = new URL(window.location.href);
+    url.searchParams.set('room', roomId);
+    window.history.pushState({}, '', url);
+  };
+
+  const handleLeaveRoom = () => {
+    setCurrentRoomId(null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('room');
+    window.history.pushState({}, '', url);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-pink-100">
-        <div className="animate-bounce">
-          <img src="https://picsum.photos/100/100?random=1" className="rounded-full shadow-lg border-4 border-white" alt="Loading" />
-          <p className="mt-4 text-pink-500 font-bold text-xl">로딩중...</p>
+        <div className="animate-bounce text-center">
+          <img src="https://picsum.photos/100/100?random=1" className="rounded-full shadow-lg border-4 border-white mx-auto" alt="Loading" />
+          <p className="mt-4 text-pink-500 font-bold text-xl">마법 가루를 뿌리는 중...</p>
         </div>
       </div>
     );
@@ -46,10 +68,10 @@ const App: React.FC = () => {
   }
 
   if (currentRoomId) {
-    return <Game roomId={currentRoomId} user={user} onLeave={() => setCurrentRoomId(null)} />;
+    return <Game roomId={currentRoomId} user={user} onLeave={handleLeaveRoom} />;
   }
 
-  return <Lobby user={user} onJoinRoom={(roomId) => setCurrentRoomId(roomId)} />;
+  return <Lobby user={user} onJoinRoom={handleJoinRoom} />;
 };
 
 export default App;

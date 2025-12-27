@@ -38,7 +38,8 @@ const Lobby: React.FC<LobbyProps> = ({ user, onJoinRoom }) => {
       const data = snapshot.val();
       if (data) {
         const now = Date.now();
-        const ROOM_EXPIRY_MS = 2 * 60 * 60 * 1000;
+        // Updated to 24 hours as per request
+        const ROOM_EXPIRY_MS = 24 * 60 * 60 * 1000; 
         const roomList: Room[] = [];
         Object.keys(data).forEach((key) => {
           const room = data[key];
