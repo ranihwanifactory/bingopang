@@ -3,8 +3,9 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ref, onValue, update, remove, get, increment, onDisconnect } from 'firebase/database';
 import { db } from '../firebase';
 import { UserInfo, Room, Player, PairRecord } from '../types';
-import { ChevronLeft, Trophy, User as UserIcon, Star, Sword, Share2, Check, Trash2 } from 'lucide-react';
+import { ChevronLeft, Trophy, User as UserIcon, Star, Share2, Check, Trash2 } from 'lucide-react';
 import KakaoAd from './KakaoAd';
+import confetti from 'https://esm.sh/canvas-confetti';
 
 interface GameProps {
   roomId: string;
@@ -12,13 +13,29 @@ interface GameProps {
   onLeave: () => void;
 }
 
+// Audio assets
+const SFX = {
+  TAP: new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3'),
+  BINGO_LINE: new Audio('https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3'),
+  WIN: new Audio('https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3'),
+  START: new Audio('https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3')
+};
+
 const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
   const [room, setRoom] = useState<Room | null>(null);
   const [localBoard, setLocalBoard] = useState<number[][]>([]);
   const [bingoCount, setBingoCount] = useState(0);
   const [vsRecords, setVsRecords] = useState<Record<string, PairRecord>>({});
   const [showShareToast, setShowShareToast] = useState(false);
+  const [showBingoPopup, setShowBingoPopup] = useState(false);
   const hasUpdatedStats = useRef(false);
+  const prevBingoCount = useRef(0);
+
+  // Sound play helper
+  const playSound = (audio: HTMLAudioElement) => {
+    audio.currentTime = 0;
+    audio.play().catch(e => console.debug("Audio play blocked by browser"));
+  };
 
   // 5x5 랜덤 보드 생성
   const generateBoard = useCallback(() => {
@@ -33,6 +50,38 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
     }
     return board;
   }, []);
+
+  // Effect for bingo line celebration
+  useEffect(() => {
+    if (bingoCount > prevBingoCount.current) {
+      // New line completed!
+      playSound(SFX.BINGO_LINE);
+      setShowBingoPopup(true);
+      setTimeout(() => setShowBingoPopup(false), 1500);
+
+      // Confetti effect
+      confetti({
+        particleCount: 100,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ['#ec4899', '#3b82f6', '#fbbf24']
+      });
+    }
+    prevBingoCount.current = bingoCount;
+  }, [bingoCount]);
+
+  // Effect for winner celebration
+  useEffect(() => {
+    if (room?.status === 'finished' && room.winner === user.uid) {
+      playSound(SFX.WIN);
+      confetti({
+        particleCount: 200,
+        spread: 160,
+        origin: { y: 0.5 },
+        colors: ['#fbbf24', '#f59e0b', '#ffffff']
+      });
+    }
+  }, [room?.status, room?.winner, user.uid]);
 
   // 상대 전적 리스너
   useEffect(() => {
@@ -58,7 +107,6 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
     const roomRef = ref(db, `rooms/${roomId}`);
     const playerRef = ref(db, `rooms/${roomId}/players/${user.uid}`);
 
-    // 접속 시 플레이어 정보 등록 및 연결 끊김 시 자동 삭제 설정
     get(roomRef).then((snapshot) => {
       const data = snapshot.val();
       if (data) {
@@ -75,8 +123,6 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
         updates[`players/${user.uid}`] = playerData;
         updates['lastActivity'] = Date.now();
         update(roomRef, updates);
-
-        // 브라우저 종료 시 플레이어 목록에서 자동 삭제
         onDisconnect(playerRef).remove();
       }
     });
@@ -98,7 +144,6 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
 
     return () => {
       unsubscribe();
-      // 컴포넌트 언마운트(로비 이동 등) 시 플레이어 목록에서 즉시 삭제
       remove(playerRef);
     };
   }, [roomId, user.uid, onLeave, generateBoard]);
@@ -154,11 +199,13 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
   const handleStartGame = async () => {
     if (!room) return;
     if (Object.keys(room.players || {}).length < 2) { alert('최소 2명의 플레이어가 필요해요!'); return; }
+    playSound(SFX.START);
     await update(ref(db, `rooms/${roomId}`), { status: 'playing', currentTurn: room.hostId, pickedNumbers: [], winner: null, lastActivity: Date.now() });
   };
 
   const handlePickNumber = async (num: number) => {
     if (!room || room.status !== 'playing' || room.currentTurn !== user.uid || room.pickedNumbers?.includes(num)) return;
+    playSound(SFX.TAP);
     const newPicked = [...(room.pickedNumbers || []), num];
     const pids = Object.keys(room.players || {});
     const nextTurn = pids[(pids.indexOf(user.uid) + 1) % pids.length];
@@ -192,7 +239,16 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
   const playersArr = Object.values(room.players || {}) as Player[];
 
   return (
-    <div className="h-screen flex flex-col bg-pink-50 overflow-hidden">
+    <div className="h-screen flex flex-col bg-pink-50 overflow-hidden relative">
+      {/* BINGO! Popup Overlay */}
+      {showBingoPopup && (
+        <div className="fixed inset-0 pointer-events-none flex items-center justify-center z-50">
+          <div className="bg-white/20 backdrop-blur-sm inset-0 absolute" />
+          <h2 className="text-8xl md:text-9xl font-black text-pink-500 drop-shadow-[0_10px_10px_rgba(0,0,0,0.3)] animate-ping absolute">BINGO!</h2>
+          <h2 className="text-8xl md:text-9xl font-black text-white drop-shadow-[0_5px_5px_rgba(236,72,153,1)] scale-110 transition-transform duration-300">BINGO!</h2>
+        </div>
+      )}
+
       {showShareToast && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 bg-blue-500 text-white px-6 py-2 rounded-full shadow-2xl z-50 flex items-center gap-2 animate-bounce">
           <Check size={18} /> 초대 링크가 복사되었어요!
@@ -200,7 +256,7 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
       )}
 
       {/* Header: Compact */}
-      <header className="flex justify-between items-center px-4 py-2 bg-white/80 backdrop-blur-sm border-b border-pink-100 shrink-0">
+      <header className="flex justify-between items-center px-4 py-2 bg-white/80 backdrop-blur-sm border-b border-pink-100 shrink-0 z-10">
         <button onClick={onLeave} className="p-1 text-pink-500 font-bold hover:bg-pink-100 rounded-xl transition-all">
           <ChevronLeft size={24} />
         </button>
@@ -219,29 +275,25 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col lg:flex-row gap-4 p-4 min-h-0">
-        {/* Left Section: Participants (Compressed) */}
+      <main className="flex-1 flex flex-col lg:flex-row gap-4 p-4 min-h-0 z-0">
         <aside className="lg:w-64 flex flex-col gap-3 shrink-0 min-h-0 overflow-hidden">
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-pink-100 flex-1 overflow-y-auto">
             <h3 className="text-sm font-bold text-gray-500 mb-3 flex items-center gap-2">
               <UserIcon size={16} className="text-pink-400" /> 접속 친구 ({playersArr.length})
             </h3>
             <div className="space-y-2">
-              {playersArr.map((p) => {
-                const vs = vsRecords[p.uid];
-                return (
-                  <div key={p.uid} className={`p-2 rounded-xl border-2 transition-all ${room.currentTurn === p.uid && room.status === 'playing' ? 'border-pink-300 bg-pink-50 shadow-sm' : 'border-gray-50'}`}>
-                    <div className="flex items-center gap-2">
-                      <img src={p.photoURL || `https://picsum.photos/80/80?seed=${p.uid}`} className="w-8 h-8 rounded-full border border-white" alt="P" />
-                      <div className="flex-1 min-w-0">
-                        <p className="font-bold text-gray-700 text-xs truncate">{p.name}{room.hostId === p.uid && ' 👑'}</p>
-                        <p className="text-pink-500 text-[10px] font-black">{p.lines || 0} 빙고!</p>
-                      </div>
-                      {room.currentTurn === p.uid && room.status === 'playing' && <div className="w-2 h-2 bg-pink-500 rounded-full animate-ping" />}
+              {playersArr.map((p) => (
+                <div key={p.uid} className={`p-2 rounded-xl border-2 transition-all ${room.currentTurn === p.uid && room.status === 'playing' ? 'border-pink-300 bg-pink-50 shadow-sm' : 'border-gray-50'}`}>
+                  <div className="flex items-center gap-2">
+                    <img src={p.photoURL || `https://picsum.photos/80/80?seed=${p.uid}`} className="w-8 h-8 rounded-full border border-white" alt="P" />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-gray-700 text-xs truncate">{p.name}{room.hostId === p.uid && ' 👑'}</p>
+                      <p className="text-pink-500 text-[10px] font-black">{p.lines || 0} 빙고!</p>
                     </div>
+                    {room.currentTurn === p.uid && room.status === 'playing' && <div className="w-2 h-2 bg-pink-500 rounded-full animate-ping" />}
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           </div>
 
@@ -263,7 +315,6 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
           )}
         </aside>
 
-        {/* Center Section: Bingo Board (Large) */}
         <section className="flex-1 flex flex-col min-h-0">
           {room.status === 'waiting' ? (
             <div className="bg-white rounded-[32px] flex-1 flex flex-col items-center justify-center border-4 border-dashed border-pink-100 shadow-sm p-8">
@@ -298,7 +349,7 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
                       onClick={() => handlePickNumber(num)} 
                       className={`aspect-square rounded-xl md:rounded-2xl flex items-center justify-center text-lg md:text-3xl font-black shadow-sm bingo-cell-anim relative overflow-hidden transition-all border-2 ${
                         room.pickedNumbers?.includes(num) 
-                          ? 'bg-pink-400 text-white border-pink-400 shadow-inner scale-95 opacity-90' 
+                          ? 'bg-pink-400 text-white border-pink-400 shadow-inner scale-95 animate-pulse' 
                           : room.currentTurn === user.uid 
                             ? 'bg-white border-blue-100 text-gray-700 hover:border-blue-300 hover:bg-blue-50' 
                             : 'bg-gray-50 border-gray-100 text-gray-300'
@@ -328,7 +379,6 @@ const Game: React.FC<GameProps> = ({ roomId, user, onLeave }) => {
         </section>
       </main>
       
-      {/* Bottom Ad Area */}
       <KakaoAd />
     </div>
   );
